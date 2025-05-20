@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Task Manager</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h2>Task Manager</h2>
+      <div>
+        <span id="welcome" class="me-3 text-muted"></span>
+        <button class="btn btn-danger" onclick="logout()">Log Out</button>
+      </div>
+    </div>
+
+    <div class="card p-4 mb-4 shadow-sm">
+      <h4>Create Task</h4>
+      <input id="taskTitle" class="form-control mb-2" placeholder="Title">
+      <input id="taskStatus" class="form-control mb-2" placeholder="Status">
+      <input id="taskDeadline" type="date" class="form-control mb-2">
+      <input id="taskFile" type="file" class="form-control mb-3">
+      <button class="btn btn-success w-100" onclick="createTask()">Create</button>
+    </div>
+
+    <!-- File input for editing task file -->
+    <div class="mb-3">
+      <label for="editTaskFile" class="form-label">Select file to replace on edit</label>
+      <input type="file" id="editTaskFile" class="form-control" />
+    </div>
+
+    <table class="table table-bordered table-hover shadow-sm bg-white">
+      <thead class="table-light">
+        <tr>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Deadline</th>
+          <th>File</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="taskTableBody"></tbody>
+    </table>
+  </div>
+
+<script>
+const apiBase = "https://znpzjgx6i2.execute-api.eu-north-1.amazonaws.com/prod";
+const userId = localStorage.getItem("userId");
+const userEmail = localStorage.getItem("userEmail");
+document.getElementById("welcome").innerHTML = `Welcome, <a href="profile.html">${userEmail || userId}</a>`;
+const jwt = localStorage.getItem("jwt");
+
+if (!userId || !jwt) {
+  alert("⚠️ You must log in first.");
+  window.location.href = "login.html";
+}
+
+async function uploadToS3(file) {
+  const res = await fetch(`${apiBase}/generate-presigned-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, contentType: file.type })
+  });
+  const data = await res.json();
+  const uploadRes = await fetch(data.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file
+  });
+  if (uploadRes.ok) return data.fileUrl;
+  throw new Error("Failed to upload file to S3");
+}
+
+async function getSignedUrl(key) {
+  const res = await fetch(`${apiBase}/generate-download-url?filename=${encodeURIComponent(key)}`);
+  const data = await res.json();
+  if (!res.ok || !data.url) throw new Error(data.error || "Failed to get signed URL");
+  return data.url;
+}
+
+function addFileButtons(cell, fileUrl, taskId) {
+  const key = fileUrl.split(".com/")[1];
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.className = "btn btn-sm btn-outline-success me-1";
+  downloadBtn.innerText = "Download";
+  downloadBtn.onclick = async () => {
+    try {
+      const signedUrl = await getSignedUrl(key);
+      window.open(signedUrl, "_blank");
+    } catch (err) {
+      alert("❌ Failed to download file: " + err.message);
+    }
+  };
+  cell.appendChild(downloadBtn);
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn btn-sm btn-outline-danger";
+  deleteBtn.innerText = "Delete File";
+  deleteBtn.onclick = async () => {
+    if (!confirm("Are you sure you want to delete this file?")) return;
+    try {
+      const res = await fetch(`${apiBase}/tasks/${taskId}/file`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        alert("✅ File deleted successfully.");
+        loadTasks();
+      } else {
+        const data = await res.json();
+        alert("❌ Failed to delete file: " + (data.message || JSON.stringify(data)));
+      }
+    } catch (err) {
+      alert("❌ Error deleting file: " + err.message);
+    }
+  };
+  cell.appendChild(deleteBtn);
+}
+
+async function createTask() {
+  try {
+    const title = document.getElementById("taskTitle").value;
+    const status = document.getElementById("taskStatus").value;
+    const deadline = document.getElementById("taskDeadline").value;
+    const file = document.getElementById("taskFile").files[0];
+
+    let fileUrl = null;
+    if (file) fileUrl = await uploadToS3(file);
+
+    const payload = { title, status, deadline, userId, fileUrl };
+    const res = await fetch(`${apiBase}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      alert("✅ Task created");
+      loadTasks();
+    } else {
+      alert("❌ Create failed: " + (data.message || JSON.stringify(data)));
+    }
+  } catch (err) {
+    alert("❌ Request failed: " + err.message);
+  }
+}
+
+async function loadTasks() {
+  try {
+    const res = await fetch(`${apiBase}/tasks?userId=${encodeURIComponent(userId)}`);
+    const tasks = await res.json();
+    const tbody = document.getElementById("taskTableBody");
+    tbody.innerHTML = "";
+    tasks.forEach(t => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${t.title}</td>
+        <td>${t.status}</td>
+        <td>${t.deadline}</td>`;
+      const fileCell = document.createElement("td");
+      if (t.fileUrl) {
+        addFileButtons(fileCell, t.fileUrl, t.taskId);
+      } else {
+        fileCell.innerText = "No file";
+      }
+      row.appendChild(fileCell);
+
+      const actionsCell = document.createElement("td");
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn btn-sm btn-primary me-1";
+      editBtn.innerText = "Edit";
+      editBtn.onclick = () => editTask(t.taskId, t.title, t.status, t.deadline);
+      actionsCell.appendChild(editBtn);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn btn-sm btn-danger";
+      delBtn.innerText = "Delete";
+      delBtn.onclick = () => deleteTask(t.taskId);
+      actionsCell.appendChild(delBtn);
+
+      row.appendChild(actionsCell);
+      tbody.appendChild(row);
+    });
+  } catch (err) {
+    alert("❌ Failed to load tasks: " + err.message);
+  }
+}
+
+function logout() {
+  localStorage.clear();
+  window.location.href = "login.html";
+}
+
+async function deleteTask(id) {
+  if (!confirm("Are you sure you want to delete this task?")) return;
+  const res = await fetch(`${apiBase}/tasks/${id}`, { method: "DELETE" });
+  if (res.ok) loadTasks();
+  else alert("❌ Delete failed");
+}
+
+function editTask(id, title, status, deadline) {
+  const newTitle = prompt("New title:", title);
+  const newStatus = prompt("New status:", status);
+  const newDeadline = prompt("New deadline (YYYY-MM-DD):", deadline);
+  if (!newTitle || !newStatus || !newDeadline) return;
+
+  const fileInput = document.getElementById("editTaskFile");
+  const file = fileInput.files[0];
+
+  if (file) {
+    uploadToS3(file).then(fileUrl => {
+      submitEdit(id, newTitle, newStatus, newDeadline, fileUrl);
+    }).catch(err => alert("❌ File upload failed: " + err.message));
+  } else {
+    submitEdit(id, newTitle, newStatus, newDeadline, null);
+  }
+}
+
+async function submitEdit(id, title, status, deadline, fileUrl) {
+  try {
+    const payload = { title, status, deadline, email: userEmail };
+    if (fileUrl) payload.fileUrl = fileUrl;
+
+    const updateUrl = `${apiBase}/tasks/${id}`;
+    const res = await fetch(updateUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      alert("✅ Task updated and notification sent");
+      loadTasks();
+      document.getElementById("editTaskFile").value = ""; // reset file input
+    } else {
+      const data = await res.json();
+      alert("❌ Failed to update task: " + (data.message || JSON.stringify(data)));
+    }
+  } catch (err) {
+    alert("❌ Update error: " + err.message);
+  }
+}
+
+window.onload = loadTasks;
+</script>
+</body>
+</html>
+
