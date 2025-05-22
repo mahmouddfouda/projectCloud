@@ -23,12 +23,6 @@
       <button class="btn btn-success w-100" onclick="createTask()">Create</button>
     </div>
 
-    <!-- File input for editing task file -->
-    <div class="mb-3">
-      <label for="editTaskFile" class="form-label">Select file to replace on edit</label>
-      <input type="file" id="editTaskFile" class="form-control" />
-    </div>
-
     <table class="table table-bordered table-hover shadow-sm bg-white">
       <thead class="table-light">
         <tr>
@@ -47,8 +41,8 @@
 const apiBase = "https://znpzjgx6i2.execute-api.eu-north-1.amazonaws.com/prod";
 const userId = localStorage.getItem("userId");
 const userEmail = localStorage.getItem("userEmail");
+const jwt = localStorage.getItem("jwt"); 
 document.getElementById("welcome").innerHTML = `Welcome, <a href="profile.html">${userEmail || userId}</a>`;
-const jwt = localStorage.getItem("jwt");
 
 if (!userId || !jwt) {
   alert("⚠️ You must log in first.");
@@ -78,6 +72,7 @@ async function getSignedUrl(key) {
   return data.url;
 }
 
+// Fixed: Add Download and Delete File buttons side by side
 function addFileButtons(cell, fileUrl, taskId) {
   const key = fileUrl.split(".com/")[1];
 
@@ -94,27 +89,27 @@ function addFileButtons(cell, fileUrl, taskId) {
   };
   cell.appendChild(downloadBtn);
 
-  const deleteBtn = document.createElement("button");
-  deleteBtn.className = "btn btn-sm btn-outline-danger";
-  deleteBtn.innerText = "Delete File";
-  deleteBtn.onclick = async () => {
-    if (!confirm("Are you sure you want to delete this file?")) return;
+  const deleteFileBtn = document.createElement("button");
+  deleteFileBtn.className = "btn btn-sm btn-outline-danger";
+  deleteFileBtn.innerText = "Delete File";
+  deleteFileBtn.onclick = async () => {
+    if (!confirm("Are you sure you want to delete the attached file?")) return;
     try {
       const res = await fetch(`${apiBase}/tasks/${taskId}/file`, {
         method: "DELETE"
       });
       if (res.ok) {
-        alert("✅ File deleted successfully.");
+        alert("✅ File deleted successfully");
         loadTasks();
       } else {
         const data = await res.json();
         alert("❌ Failed to delete file: " + (data.message || JSON.stringify(data)));
       }
     } catch (err) {
-      alert("❌ Error deleting file: " + err.message);
+      alert("❌ Request failed: " + err.message);
     }
   };
-  cell.appendChild(deleteBtn);
+  cell.appendChild(deleteFileBtn);
 }
 
 async function createTask() {
@@ -146,6 +141,7 @@ async function createTask() {
   }
 }
 
+// Fixed: Load tasks with both buttons on file and actions columns
 async function loadTasks() {
   try {
     const res = await fetch(`${apiBase}/tasks?userId=${encodeURIComponent(userId)}`);
@@ -170,7 +166,7 @@ async function loadTasks() {
       const editBtn = document.createElement("button");
       editBtn.className = "btn btn-sm btn-primary me-1";
       editBtn.innerText = "Edit";
-      editBtn.onclick = () => editTask(t.taskId, t.title, t.status, t.deadline);
+      editBtn.onclick = () => editTask(t.taskId, t.title, t.status, t.deadline, t.fileUrl);
       actionsCell.appendChild(editBtn);
 
       const delBtn = document.createElement("button");
@@ -192,53 +188,82 @@ function logout() {
   window.location.href = "login.html";
 }
 
-async function deleteTask(id) {
-  if (!confirm("Are you sure you want to delete this task?")) return;
-  const res = await fetch(`${apiBase}/tasks/${id}`, { method: "DELETE" });
-  if (res.ok) loadTasks();
-  else alert("❌ Delete failed");
-}
+async function editTask(id, title, status, deadline, existingFileUrl) {
+  try {
+    const newTitle = prompt("New title:", title);
+    if (!newTitle) return;
+    const newStatus = prompt("New status:", status);
+    if (!newStatus) return;
+    const newDeadline = prompt("New deadline (YYYY-MM-DD):", deadline);
+    if (!newDeadline) return;
 
-function editTask(id, title, status, deadline) {
-  const newTitle = prompt("New title:", title);
-  const newStatus = prompt("New status:", status);
-  const newDeadline = prompt("New deadline (YYYY-MM-DD):", deadline);
-  if (!newTitle || !newStatus || !newDeadline) return;
-
-  const fileInput = document.getElementById("editTaskFile");
-  const file = fileInput.files[0];
-
-  if (file) {
-    uploadToS3(file).then(fileUrl => {
-      submitEdit(id, newTitle, newStatus, newDeadline, fileUrl);
-    }).catch(err => alert("❌ File upload failed: " + err.message));
-  } else {
-    submitEdit(id, newTitle, newStatus, newDeadline, null);
+    let newFileUrl = existingFileUrl;
+    const uploadNewFile = confirm("Do you want to upload a new file?");
+    if (uploadNewFile) {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.onchange = async () => {
+        const file = fileInput.files[0];
+        if (file) {
+          try {
+            newFileUrl = await uploadToS3(file);
+            await submitEdit(id, newTitle, newStatus, newDeadline, newFileUrl);
+          } catch (err) {
+            alert("❌ File upload failed: " + err.message);
+          }
+        }
+      };
+      fileInput.click();
+    } else {
+      await submitEdit(id, newTitle, newStatus, newDeadline, newFileUrl);
+    }
+  } catch (err) {
+    alert("❌ Edit error: " + err.message);
   }
 }
 
 async function submitEdit(id, title, status, deadline, fileUrl) {
   try {
-    const payload = { title, status, deadline, email: userEmail };
-    if (fileUrl) payload.fileUrl = fileUrl;
-
     const updateUrl = `${apiBase}/tasks/${id}`;
+
     const res = await fetch(updateUrl, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        title,
+        status,
+        deadline,
+        fileUrl,
+        email: userEmail
+      })
     });
 
     if (res.ok) {
       alert("✅ Task updated and notification sent");
       loadTasks();
-      document.getElementById("editTaskFile").value = ""; // reset file input
     } else {
       const data = await res.json();
       alert("❌ Failed to update task: " + (data.message || JSON.stringify(data)));
     }
   } catch (err) {
     alert("❌ Update error: " + err.message);
+  }
+}
+
+async function deleteTask(id) {
+  if (!confirm("Are you sure you want to delete this task?")) return;
+  try {
+    const res = await fetch(`${apiBase}/tasks/${id}`, {
+      method: "DELETE"
+    });
+    if (res.ok) {
+      alert("✅ Task deleted");
+      loadTasks();
+    } else {
+      alert("❌ Failed to delete task");
+    }
+  } catch (err) {
+    alert("❌ Delete request failed: " + err.message);
   }
 }
 

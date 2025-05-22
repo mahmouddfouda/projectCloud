@@ -26,11 +26,27 @@
   const region = "eu-north-1";
   const clientId = "4hur851ff2i7cl3ac11hnijo3d";
   const clientSecret = "1ujc9v1f80fqcgakvgrjjmlcmfi2802lrgdrnumknuo18p7raes4";
+  const apiBase = "https://znpzjgx6i2.execute-api.eu-north-1.amazonaws.com/prod";
 
   function getSecretHash(username) {
     const message = username + clientId;
     const hash = CryptoJS.HmacSHA256(message, clientSecret);
     return CryptoJS.enc.Base64.stringify(hash);
+  }
+
+  async function saveUserProfile(userId, email) {
+    try {
+      const res = await fetch(`${apiBase}/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: userId, email: email })
+      });
+      if (!res.ok) {
+        console.error("Failed to save user profile", await res.text());
+      }
+    } catch (error) {
+      console.error("Error saving user profile:", error);
+    }
   }
 
   async function handleLogin() {
@@ -61,7 +77,7 @@
     if (data.ChallengeName === "NEW_PASSWORD_REQUIRED") {
       const newPassword = prompt("New password required:");
       await respondToNewPasswordChallenge(email, newPassword, data.Session);
-    } else if (data.AuthenticationResult?.IdToken) {
+    } else if (data.AuthenticationResult?.IdToken && data.AuthenticationResult?.AccessToken) {
       localStorage.setItem("jwt", data.AuthenticationResult.IdToken);
       localStorage.setItem("accessToken", data.AuthenticationResult.AccessToken);
       localStorage.setItem("userId", email);
@@ -98,6 +114,10 @@
       localStorage.setItem("userId", email);
       localStorage.setItem("userEmail", email);
       localStorage.setItem("jwt", "dev-token");
+
+      // Save new user profile to RDS
+      await saveUserProfile(email, email);
+
       window.location.href = "tasks.html";
     } else {
       alert("❌ Sign-up failed: " + (data.message || JSON.stringify(data)));
@@ -139,3 +159,4 @@
 </script>
 </body>
 </html>
+
