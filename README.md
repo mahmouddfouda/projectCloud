@@ -74,4 +74,4 @@ Create dashboards for performance metrics
 Set alarms for errors and latency
 
   -Step 9: Deploy Frontend
-Host the frontend static files (login.html, tasks.html, profile.html) on S3 or your preferred hosting
+Host the frontend static files (login.html, tasks.html, profile.html)
