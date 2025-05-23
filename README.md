@@ -77,3 +77,33 @@ Set alarms for errors and latency
 
   -Step 9: Deploy Frontend
 Host the frontend static files (login.html, tasks.html, profile.html)
+
+///////////////////////////////////////////////////////////////////////
+User Registration and Login
+New users can sign up with their email and password
+
+Users receive a verification email before accessing the system
+
+Returning users log in with email and password
+
+Task Management
+After login, users see their task list with task details
+
+Users can create new tasks with title, status, deadline, and optional file attachment
+
+Edit existing tasks, including replacing or removing attachments
+
+Delete tasks when no longer needed
+
+Download attached files directly from the task list
+
+Delete attachments independently without deleting the whole task
+
+Profile Management
+Access profile page from the top-right email link
+
+View registered email and user info stored in RDS
+
+Change password securely within the profile page
+
+Log out to end the session
