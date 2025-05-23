@@ -83,6 +83,8 @@ Host the frontend static files (login.html, tasks.html, profile.html)
 
 
 User Manual
+
+
 This manual explains how to use the Task Management System web app.
 
 
